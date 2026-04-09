@@ -20,11 +20,11 @@ const pool = new Pool(
         ssl: { rejectUnauthorized: false }
       }
     : {
-        host:     process.env.DB_HOST     || "localhost",
+        host:     process.env.DB_HOST     || "postgresql://postgres:BGEdRpVVkkHAKbFQJXRfuuhFAKZSwbMp@maglev.proxy.rlwy.net:20695/railway",
         port:     process.env.DB_PORT     || 5432,
         database: process.env.DB_NAME     || "zitouna",
         user:     process.env.DB_USER     || "postgres",
-        password: process.env.DB_PASSWORD || "postgres"
+        password: process.env.DB_PASSWORD || "BGEdRpVVkkHAKbFQJXRfuuhFAKZSwbMp"
       }
 );
 
