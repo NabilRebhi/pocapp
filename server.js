@@ -1,159 +1,316 @@
-
 const express = require("express");
 const cors = require("cors");
+const { Pool } = require("pg");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = 4000;
+const PORT = process.env.PORT || 4000;
 
-const customers = [
-  {
-    customerId: "CUST001",
-    username: "client1",
-    password: "1234",
-    fullName: "Client Zitouna"
-  }
-];
+// ─────────────────────────────────────────────
+// PostgreSQL connection
+// In Railway: add a Postgres service and it will
+// auto-inject DATABASE_URL into your Node service.
+// ─────────────────────────────────────────────
+const pool = new Pool(
+  process.env.DATABASE_URL
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false }
+      }
+    : {
+        host:     process.env.DB_HOST     || "localhost",
+        port:     process.env.DB_PORT     || 5432,
+        database: process.env.DB_NAME     || "zitouna",
+        user:     process.env.DB_USER     || "postgres",
+        password: process.env.DB_PASSWORD || "postgres"
+      }
+);
 
-const accounts = [
-  {
-    accountId: "ACC001",
-    customerId: "CUST001",
-    accountNumber: "123456789",
-    type: "Courant",
-    currency: "TND",
-    balance: 1500.250,
-    status: "ACTIVE"
-  },
-  {
-    accountId: "ACC002",
-    customerId: "CUST001",
-    accountNumber: "987654321",
-    type: "Epargne",
-    currency: "TND",
-    balance: 8200.000,
-    status: "ACTIVE"
-  }
-];
+// ─────────────────────────────────────────────
+// HELPER: get user row by Keycloak preferred_username
+// ─────────────────────────────────────────────
+async function getUserByUsername(username) {
+  const result = await pool.query(
+    "SELECT * FROM users WHERE username = $1 AND is_active = TRUE",
+    [username]
+  );
+  return result.rows[0] || null;
+}
 
-const transactions = {
-  ACC001: [
-    {
-      id: "TR001",
-      date: "2026-04-01",
-      label: "Virement reçu",
-      amount: 250.000,
-      type: "CREDIT"
-    },
-    {
-      id: "TR002",
-      date: "2026-04-02",
-      label: "Retrait GAB",
-      amount: -100.000,
-      type: "DEBIT"
-    },
-    {
-      id: "TR003",
-      date: "2026-04-03",
-      label: "Paiement TPE",
-      amount: -55.500,
-      type: "DEBIT"
-    }
-  ],
-  ACC002: [
-    {
-      id: "TR004",
-      date: "2026-04-05",
-      label: "Versement",
-      amount: 1000.000,
-      type: "CREDIT"
-    }
-  ]
-};
-
+// ─────────────────────────────────────────────
+// HEALTH CHECK
+// ─────────────────────────────────────────────
 app.get("/", (req, res) => {
-  res.json({
-    message: "Banking Mock API is running"
-  });
+  res.json({ message: "Zitouna Bank API is running" });
 });
 
-app.post("/login", (req, res) => {
-  const { username, password } = req.body;
+// ─────────────────────────────────────────────
+// USER PROFILE
+// GET /users/profile?username=mohamedali.bensalah
+// ─────────────────────────────────────────────
+app.get("/users/profile", async (req, res) => {
+  const { username } = req.query;
+  if (!username) return res.status(400).json({ message: "username requis" });
 
-  const user = customers.find(
-    c => c.username === username && c.password === password
-  );
+  try {
+    const user = await getUserByUsername(username);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
 
-  if (!user) {
-    return res.status(401).json({
-      message: "Identifiants invalides"
-    });
+    const { keycloak_id, ...safeUser } = user;
+    res.json(safeUser);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
   }
-
-  res.json({
-    message: "Login réussi",
-    token: "mock-token-123456",
-    customerId: user.customerId,
-    fullName: user.fullName
-  });
 });
 
-app.get("/customers/:customerId/accounts", (req, res) => {
-  const { customerId } = req.params;
+// ─────────────────────────────────────────────
+// ACCOUNTS
+// GET /accounts?username=mohamedali.bensalah
+// GET /accounts/:accountId
+// GET /accounts/:accountId/balance
+// ─────────────────────────────────────────────
+app.get("/accounts", async (req, res) => {
+  const { username } = req.query;
+  if (!username) return res.status(400).json({ message: "username requis" });
 
-  const customerAccounts = accounts.filter(
-    acc => acc.customerId === customerId
-  );
+  try {
+    const user = await getUserByUsername(username);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
 
-  res.json({
-    accounts: customerAccounts
-  });
-});
-
-app.get("/accounts/:accountId", (req, res) => {
-  const { accountId } = req.params;
-
-  const account = accounts.find(acc => acc.accountId === accountId);
-
-  if (!account) {
-    return res.status(404).json({
-      message: "Compte introuvable"
-    });
+    const result = await pool.query(
+      "SELECT * FROM accounts WHERE user_id = $1 AND is_active = TRUE ORDER BY account_id",
+      [user.user_id]
+    );
+    res.json({ accounts: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
   }
-
-  res.json(account);
 });
 
-app.get("/accounts/:accountId/balance", (req, res) => {
-  const { accountId } = req.params;
-
-  const account = accounts.find(acc => acc.accountId === accountId);
-
-  if (!account) {
-    return res.status(404).json({
-      message: "Compte introuvable"
-    });
+app.get("/accounts/:accountId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM accounts WHERE account_id = $1",
+      [req.params.accountId]
+    );
+    if (!result.rows[0]) return res.status(404).json({ message: "Compte introuvable" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
   }
-
-  res.json({
-    accountId: account.accountId,
-    availableBalance: account.balance,
-    ledgerBalance: account.balance,
-    currency: account.currency,
-    lastUpdate: new Date().toISOString()
-  });
 });
 
-app.get("/accounts/:accountId/transactions", (req, res) => {
-  const { accountId } = req.params;
+app.get("/accounts/:accountId/balance", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT account_id, balance, currency FROM accounts WHERE account_id = $1",
+      [req.params.accountId]
+    );
+    if (!result.rows[0]) return res.status(404).json({ message: "Compte introuvable" });
 
-  res.json({
-    transactions: transactions[accountId] || []
-  });
+    const acc = result.rows[0];
+    res.json({
+      accountId:        acc.account_id,
+      availableBalance: acc.balance,
+      ledgerBalance:    acc.balance,
+      currency:         acc.currency,
+      lastUpdate:       new Date().toISOString()
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
 });
 
+// ─────────────────────────────────────────────
+// TRANSACTIONS
+// GET /accounts/:accountId/transactions
+// ─────────────────────────────────────────────
+app.get("/accounts/:accountId/transactions", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM transactions WHERE account_id = $1 ORDER BY executed_at DESC",
+      [req.params.accountId]
+    );
+    res.json({ transactions: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// CARDS
+// GET /cards?username=mohamedali.bensalah
+// ─────────────────────────────────────────────
+app.get("/cards", async (req, res) => {
+  const { username } = req.query;
+  if (!username) return res.status(400).json({ message: "username requis" });
+
+  try {
+    const user = await getUserByUsername(username);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
+    const result = await pool.query(
+      `SELECT c.* FROM cards c
+       INNER JOIN accounts a ON c.account_id = a.account_id
+       WHERE a.user_id = $1
+       ORDER BY c.card_id`,
+      [user.user_id]
+    );
+    res.json({ cards: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// BILLS
+// GET /bills?username=mohamedali.bensalah
+// ─────────────────────────────────────────────
+app.get("/bills", async (req, res) => {
+  const { username } = req.query;
+  if (!username) return res.status(400).json({ message: "username requis" });
+
+  try {
+    const user = await getUserByUsername(username);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
+    const result = await pool.query(
+      "SELECT * FROM bills WHERE user_id = $1 ORDER BY due_date ASC",
+      [user.user_id]
+    );
+    res.json({ bills: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// LOANS
+// GET /loans?username=mohamedali.bensalah
+// ─────────────────────────────────────────────
+app.get("/loans", async (req, res) => {
+  const { username } = req.query;
+  if (!username) return res.status(400).json({ message: "username requis" });
+
+  try {
+    const user = await getUserByUsername(username);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
+    const result = await pool.query(
+      "SELECT * FROM loans WHERE user_id = $1 ORDER BY loan_id",
+      [user.user_id]
+    );
+    res.json({ loans: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// NOTIFICATIONS
+// GET  /notifications?username=mohamedali.bensalah
+// PATCH /notifications/:notificationId/read
+// ─────────────────────────────────────────────
+app.get("/notifications", async (req, res) => {
+  const { username } = req.query;
+  if (!username) return res.status(400).json({ message: "username requis" });
+
+  try {
+    const user = await getUserByUsername(username);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
+    const result = await pool.query(
+      "SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC",
+      [user.user_id]
+    );
+    res.json({ notifications: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+app.patch("/notifications/:notificationId/read", async (req, res) => {
+  try {
+    await pool.query(
+      "UPDATE notifications SET is_read = TRUE WHERE notification_id = $1",
+      [req.params.notificationId]
+    );
+    res.json({ message: "Notification marquée comme lue" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// BENEFICIARIES
+// GET /beneficiaries?username=mohamedali.bensalah
+// ─────────────────────────────────────────────
+app.get("/beneficiaries", async (req, res) => {
+  const { username } = req.query;
+  if (!username) return res.status(400).json({ message: "username requis" });
+
+  try {
+    const user = await getUserByUsername(username);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
+    const result = await pool.query(
+      "SELECT * FROM beneficiaries WHERE user_id = $1 ORDER BY is_favorite DESC, full_name ASC",
+      [user.user_id]
+    );
+    res.json({ beneficiaries: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// EXCHANGE RATES  (public)
+// GET /exchange-rates
+// ─────────────────────────────────────────────
+app.get("/exchange-rates", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM exchange_rates ORDER BY currency_code ASC"
+    );
+    res.json({ exchangeRates: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// BRANCHES  (public)
+// GET /branches
+// ─────────────────────────────────────────────
+app.get("/branches", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM branches ORDER BY city ASC, name ASC"
+    );
+    res.json({ branches: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// START
+// ─────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`Mock API running on http://localhost:${PORT}`);
+  console.log(`Zitouna Bank API running on port ${PORT}`);
 });
