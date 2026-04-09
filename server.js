@@ -13,20 +13,14 @@ const PORT = process.env.PORT || 8080;
 // In Railway: add a Postgres service and it will
 // auto-inject DATABASE_URL into your Node service.
 // ─────────────────────────────────────────────
-const pool = new Pool(
-  process.env.DATABASE_URL
-    ? {
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false }
-      }
-    : {
-        host:     process.env.DB_HOST     || "postgresql://postgres:BGEdRpVVkkHAKbFQJXRfuuhFAKZSwbMp@maglev.proxy.rlwy.net:20695/railway",
-        port:     process.env.DB_PORT     || 5432,
-        database: process.env.DB_NAME     || "zitouna",
-        user:     process.env.DB_USER     || "postgres",
-        password: process.env.DB_PASSWORD || "BGEdRpVVkkHAKbFQJXRfuuhFAKZSwbMp"
-      }
-);
+const pool = new Pool({
+  host: "postgres.railway.internal",
+  port: 5432,
+  database: "railway",
+  user: "postgres",
+  password: "BGEdRpVVkkHAKbFQJXRfuuhFAKZSwbMp",
+  ssl: { rejectUnauthorized: false }
+});
 
 // ─────────────────────────────────────────────
 // HELPER: get user row by Keycloak preferred_username
