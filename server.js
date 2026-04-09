@@ -14,9 +14,9 @@ const PORT = process.env.PORT || 4000;
 // auto-inject DATABASE_URL into your Node service.
 // ─────────────────────────────────────────────
 const pool = new Pool({
-  host: "postgres.railway.internal",
+  host: "postgresql://postgres:BGEdRpVVkkHAKbFQJXRfuuhFAKZSwbMp@maglev.proxy.rlwy.net:20695/railway",
   port: 5432,
-  database: "railway",
+  database: "zitouna",
   user: "postgres",
   password: "BGEdRpVVkkHAKbFQJXRfuuhFAKZSwbMp",
   ssl: { rejectUnauthorized: false }
