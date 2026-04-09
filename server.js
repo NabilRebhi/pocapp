@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT;
 
 // ─────────────────────────────────────────────
 // PostgreSQL connection
@@ -14,11 +14,11 @@ const PORT = process.env.PORT || 4000;
 // auto-inject DATABASE_URL into your Node service.
 // ─────────────────────────────────────────────
 const pool = new Pool({
-  host: "postgresql://postgres:BGEdRpVVkkHAKbFQJXRfuuhFAKZSwbMp@maglev.proxy.rlwy.net:20695/railway",
-  port: 5432,
-  database: "zitouna",
-  user: "postgres",
-  password: "BGEdRpVVkkHAKbFQJXRfuuhFAKZSwbMp",
+  host: process.env.PGHOST,
+  port: process.env.PGPORT,
+  database: process.env.PGDATABASE,
+  user: process.env.PGUSER,
+  password: process.env.PGPASSWORD,
   ssl: { rejectUnauthorized: false }
 });
 
