@@ -22,8 +22,19 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+
+
+pool.connect((err, client, release) => {
+  if (err) {
+    console.error("❌ Database connection failed:", err.message);
+  } else {
+    console.log("✅ Database connected successfully");
+    release();
+  }
+});
+ 
 // ─────────────────────────────────────────────
-// HELPER: get user row by Keycloak preferred_username
+// HELPER
 // ─────────────────────────────────────────────
 async function getUserByUsername(username) {
   const result = await pool.query(
@@ -32,48 +43,48 @@ async function getUserByUsername(username) {
   );
   return result.rows[0] || null;
 }
-
+ 
 // ─────────────────────────────────────────────
 // HEALTH CHECK
 // ─────────────────────────────────────────────
 app.get("/", (req, res) => {
   res.json({ message: "Zitouna Bank API is running" });
 });
-
+ 
 // ─────────────────────────────────────────────
 // USER PROFILE
-// GET /users/profile?username=mohamedali.bensalah
+// POST /users/profile
+// Body: { "username": "mohamedali.bensalah" }
 // ─────────────────────────────────────────────
-app.get("/users/profile", async (req, res) => {
-  const { username } = req.query;
+app.post("/users/profile", async (req, res) => {
+  const { username } = req.body;
   if (!username) return res.status(400).json({ message: "username requis" });
-
+ 
   try {
     const user = await getUserByUsername(username);
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
-
+ 
     const { keycloak_id, ...safeUser } = user;
     res.json(safeUser);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
 // ACCOUNTS
-// GET /accounts?username=mohamedali.bensalah
-// GET /accounts/:accountId
-// GET /accounts/:accountId/balance
+// POST /accounts
+// Body: { "username": "mohamedali.bensalah" }
 // ─────────────────────────────────────────────
-app.get("/accounts", async (req, res) => {
-  const { username } = req.query;
+app.post("/accounts", async (req, res) => {
+  const { username } = req.body;
   if (!username) return res.status(400).json({ message: "username requis" });
-
+ 
   try {
     const user = await getUserByUsername(username);
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
-
+ 
     const result = await pool.query(
       "SELECT * FROM accounts WHERE user_id = $1 AND is_active = TRUE ORDER BY account_id",
       [user.user_id]
@@ -81,32 +92,42 @@ app.get("/accounts", async (req, res) => {
     res.json({ accounts: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
-app.get("/accounts/:accountId", async (req, res) => {
+ 
+// POST /accounts/detail
+// Body: { "account_id": 1 }
+app.post("/accounts/detail", async (req, res) => {
+  const { account_id } = req.body;
+  if (!account_id) return res.status(400).json({ message: "account_id requis" });
+ 
   try {
     const result = await pool.query(
       "SELECT * FROM accounts WHERE account_id = $1",
-      [req.params.accountId]
+      [account_id]
     );
     if (!result.rows[0]) return res.status(404).json({ message: "Compte introuvable" });
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
-app.get("/accounts/:accountId/balance", async (req, res) => {
+ 
+// POST /accounts/balance
+// Body: { "account_id": 1 }
+app.post("/accounts/balance", async (req, res) => {
+  const { account_id } = req.body;
+  if (!account_id) return res.status(400).json({ message: "account_id requis" });
+ 
   try {
     const result = await pool.query(
       "SELECT account_id, balance, currency FROM accounts WHERE account_id = $1",
-      [req.params.accountId]
+      [account_id]
     );
     if (!result.rows[0]) return res.status(404).json({ message: "Compte introuvable" });
-
+ 
     const acc = result.rows[0];
     res.json({
       accountId:        acc.account_id,
@@ -117,39 +138,44 @@ app.get("/accounts/:accountId/balance", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
 // TRANSACTIONS
-// GET /accounts/:accountId/transactions
+// POST /transactions
+// Body: { "account_id": 1 }
 // ─────────────────────────────────────────────
-app.get("/accounts/:accountId/transactions", async (req, res) => {
+app.post("/transactions", async (req, res) => {
+  const { account_id } = req.body;
+  if (!account_id) return res.status(400).json({ message: "account_id requis" });
+ 
   try {
     const result = await pool.query(
       "SELECT * FROM transactions WHERE account_id = $1 ORDER BY executed_at DESC",
-      [req.params.accountId]
+      [account_id]
     );
     res.json({ transactions: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
 // CARDS
-// GET /cards?username=mohamedali.bensalah
+// POST /cards
+// Body: { "username": "mohamedali.bensalah" }
 // ─────────────────────────────────────────────
-app.get("/cards", async (req, res) => {
-  const { username } = req.query;
+app.post("/cards", async (req, res) => {
+  const { username } = req.body;
   if (!username) return res.status(400).json({ message: "username requis" });
-
+ 
   try {
     const user = await getUserByUsername(username);
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
-
+ 
     const result = await pool.query(
       `SELECT c.* FROM cards c
        INNER JOIN accounts a ON c.account_id = a.account_id
@@ -160,22 +186,23 @@ app.get("/cards", async (req, res) => {
     res.json({ cards: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
 // BILLS
-// GET /bills?username=mohamedali.bensalah
+// POST /bills
+// Body: { "username": "mohamedali.bensalah" }
 // ─────────────────────────────────────────────
-app.get("/bills", async (req, res) => {
-  const { username } = req.query;
+app.post("/bills", async (req, res) => {
+  const { username } = req.body;
   if (!username) return res.status(400).json({ message: "username requis" });
-
+ 
   try {
     const user = await getUserByUsername(username);
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
-
+ 
     const result = await pool.query(
       "SELECT * FROM bills WHERE user_id = $1 ORDER BY due_date ASC",
       [user.user_id]
@@ -183,22 +210,23 @@ app.get("/bills", async (req, res) => {
     res.json({ bills: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
 // LOANS
-// GET /loans?username=mohamedali.bensalah
+// POST /loans
+// Body: { "username": "mohamedali.bensalah" }
 // ─────────────────────────────────────────────
-app.get("/loans", async (req, res) => {
-  const { username } = req.query;
+app.post("/loans", async (req, res) => {
+  const { username } = req.body;
   if (!username) return res.status(400).json({ message: "username requis" });
-
+ 
   try {
     const user = await getUserByUsername(username);
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
-
+ 
     const result = await pool.query(
       "SELECT * FROM loans WHERE user_id = $1 ORDER BY loan_id",
       [user.user_id]
@@ -206,23 +234,26 @@ app.get("/loans", async (req, res) => {
     res.json({ loans: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
 // NOTIFICATIONS
-// GET  /notifications?username=mohamedali.bensalah
-// PATCH /notifications/:notificationId/read
+// POST /notifications
+// Body: { "username": "mohamedali.bensalah" }
+//
+// POST /notifications/read
+// Body: { "notification_id": 1 }
 // ─────────────────────────────────────────────
-app.get("/notifications", async (req, res) => {
-  const { username } = req.query;
+app.post("/notifications", async (req, res) => {
+  const { username } = req.body;
   if (!username) return res.status(400).json({ message: "username requis" });
-
+ 
   try {
     const user = await getUserByUsername(username);
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
-
+ 
     const result = await pool.query(
       "SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC",
       [user.user_id]
@@ -230,35 +261,39 @@ app.get("/notifications", async (req, res) => {
     res.json({ notifications: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
-app.patch("/notifications/:notificationId/read", async (req, res) => {
+ 
+app.post("/notifications/read", async (req, res) => {
+  const { notification_id } = req.body;
+  if (!notification_id) return res.status(400).json({ message: "notification_id requis" });
+ 
   try {
     await pool.query(
       "UPDATE notifications SET is_read = TRUE WHERE notification_id = $1",
-      [req.params.notificationId]
+      [notification_id]
     );
     res.json({ message: "Notification marquée comme lue" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
 // BENEFICIARIES
-// GET /beneficiaries?username=mohamedali.bensalah
+// POST /beneficiaries
+// Body: { "username": "mohamedali.bensalah" }
 // ─────────────────────────────────────────────
-app.get("/beneficiaries", async (req, res) => {
-  const { username } = req.query;
+app.post("/beneficiaries", async (req, res) => {
+  const { username } = req.body;
   if (!username) return res.status(400).json({ message: "username requis" });
-
+ 
   try {
     const user = await getUserByUsername(username);
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
-
+ 
     const result = await pool.query(
       "SELECT * FROM beneficiaries WHERE user_id = $1 ORDER BY is_favorite DESC, full_name ASC",
       [user.user_id]
@@ -266,15 +301,15 @@ app.get("/beneficiaries", async (req, res) => {
     res.json({ beneficiaries: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
-// EXCHANGE RATES  (public)
-// GET /exchange-rates
+// EXCHANGE RATES  (no body needed)
+// POST /exchange-rates
 // ─────────────────────────────────────────────
-app.get("/exchange-rates", async (req, res) => {
+app.post("/exchange-rates", async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM exchange_rates ORDER BY currency_code ASC"
@@ -282,15 +317,15 @@ app.get("/exchange-rates", async (req, res) => {
     res.json({ exchangeRates: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
-// BRANCHES  (public)
-// GET /branches
+// BRANCHES  (no body needed)
+// POST /branches
 // ─────────────────────────────────────────────
-app.get("/branches", async (req, res) => {
+app.post("/branches", async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM branches ORDER BY city ASC, name ASC"
@@ -298,13 +333,14 @@ app.get("/branches", async (req, res) => {
     res.json({ branches: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", detail: err.message });
   }
 });
-
+ 
 // ─────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`Zitouna Bank API running on port ${PORT}`);
 });
+ 
